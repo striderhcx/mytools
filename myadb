@@ -1,0 +1,141 @@
+#!/usr/bin/python2
+#coding=utf-8
+
+# author:huangchangxin
+# version:V0.1
+# date:2017-4-11
+#modified:2017-4-12  Add function:"mutil adb support" 
+#modified:2017-4-26  Add file exit check
+
+#前提:adb 已经启动（source adb.sh start）
+#用法：先把我的脚本拷贝到ubuntu的目录：sudo cp myadb /usr/bin/目录
+#然后在任何地方：
+#（1）推送文件   myadb  +参数1(computer的文件,目前只支持绝对路径，推送的升级包必须带有.zip后缀，目前默认.zip都推送到/storage/sdcard0/根目录)
+#如myadb  out/target/product/ja…./system/bin/adb.sh 
+#这条直接会推送到/system/bin/目录，自动检测需要推送的目录，目前支持/system/bin/   /system/lib   /system/framework/   /vendor/vehicle/bin   /vendor/vehicle/lib/
+#推送完之后，脚本自己killall  adb，不用担心电脑卡顿。
+# （2）功能二：和原来的adb shell 功能一致，不过更强大：myadb shell 进去之后，不用再mount  -o  remount,rw /system就可以自由复制东西到/system目录，不过你得自己sync一下，因为这时候脚本是在ubuntu上跑的，在板子里已经不起作用。
+
+
+
+import os
+import commands
+import time
+import sys
+import multiprocessing
+
+
+#################################################
+#detected devices list
+#################################################
+
+class adb_worker(multiprocessing.Process):
+    
+    def __init__(self, which_device):
+        super(adb_worker, self).__init__()
+        self.which_device=which_device
+
+    def run(self):
+        print('start push %s to %s' % (sys.argv[1], self.which_device))
+        #while 1:
+        #    print('which_device=%s' % self.which_device)
+        #    time.sleep(1)
+        status,ret = commands.getstatusoutput('adb -s %s root' % self.which_device)
+
+        while("error" in  ret):
+            print("adb start failed %s retrying......" % ret)
+            print("请检查插adb线了没？")
+            status,ret = commands.getstatusoutput('adb -s %s root' % self.which_device)
+            time.sleep(1)
+        if "running as root" in ret:
+            print(ret)
+
+
+        status,ret = commands.getstatusoutput('adb -s %s remount' % self.which_device)
+        while("remount succeeded" not in ret):
+            status,ret = commands.getstatusoutput('adb -s %s remount' % self.which_device)
+            print("adb remount retrying.....")
+            time.sleep(0.2)
+        print(ret)
+        #################get the user pass argv[1] to me! #######################################
+
+        to = None
+        
+        if "reboot" in sys.argv[1]:
+            os.system("adb -s %s reboot" % self.which_device)
+        elif "shell" in sys.argv[1]:
+            os.system("adb -s %s shell mount -o remount,rw /system" % self.which_device)
+            os.system("adb -s %s shell mount -o remount,rw /" % self.which_device)
+            os.system("adb -s %s shell" % self.which_device)
+
+        if "reboot" not in sys.argv[1] and "shell" not in sys.argv[1]:# filter the command adb shell adb reboot not check the file
+            #print(os.path.isfile(sys.argv[1])) # debug
+            ################check if the file is exit!###############################################
+            while os.path.isfile(sys.argv[1]) is False:
+                time.sleep(1)
+                print("文件不存在，请输入正确的文件路径!!")
+
+        if  "/system/bin/" in sys.argv[1]:
+            print("push to /system/bin/")
+            to = "/system/bin/"
+        elif "/system/lib/" in sys.argv[1]:
+            print("push to /system/lib/")
+            to = "/system/lib/"
+        elif "/system/framework/" in sys.argv[1]:
+            print("push to /system/framework/")
+            to = "/system/framework/"
+        elif "/vendor/vehicle/bin/" in sys.argv[1]:
+            print("push to /vendor/vehicle/bin/")
+            to = "/vendor/vehicle/bin/"
+        elif "/vendor/vehicle/lib/" in sys.argv[1]:
+            print("push to /vendor/vehicle/lib/")
+            to = "/vendor/vehicle/lib/"
+        elif ".zip" in sys.argv[1]:
+            print("push to /storage/sdcard0/")
+            to = "/storage/sdcard0/"
+        elif "/system/app/FastRVC/" in sys.argv[1]:
+            print("push to /system/app/FastRVC/FastRVC.apk")
+            to = "/system/app/FastRVC/"
+        elif "/system/priv-app/MediaProvider" in sys.argv[1]:
+            print("push to /system/priv-app/MediaProvider")
+            to = "/system/priv-app/MediaProvider/"
+        #elif "shell" in sys.argv[1]:
+            #os.system("adb -s %s shell mount -o remount,rw /system" % self.which_device)
+            #os.system("adb -s %s shell mount -o remount,rw /" % self.which_device)
+            #os.system("adb -s %s shell" % self.which_device)
+        else:
+            print("Use sys.argv[1]=%s " % sys.argv[1])
+        ##### if to is not None ,and we can sure the destination is can find!!!
+        if to is not None:
+            begin_time=time.time()
+            status,ret = commands.getstatusoutput('adb -s %s push %s %s' % (self.which_device,sys.argv[1],to))
+            status,ret = commands.getstatusoutput('adb -s %s shell sync' % self.which_device)
+            end_time=time.time()
+            print("cost time: %s Seconds!" % (end_time - begin_time))
+        ##### we should kill the adb proccess!
+        status,ret = commands.getstatusoutput("killall adb")
+    
+        print('End push %s to %s' % (sys.argv[1], self.which_device))
+
+
+if __name__ == "__main__":
+    #because when the command 'adb devices' first time run doesn't return what I want,so I run it twice
+    status,ret = commands.getstatusoutput('adb devices')
+
+    status,ret = commands.getstatusoutput('adb devices')
+    devices=[]
+    devices_count=ret.count('\t')
+    
+    plist=[]
+    for i in range(devices_count):
+        devices.append(ret.split('\n')[i+1].split('\t')[0])
+        p = adb_worker(devices[i])
+        plist.append(p)
+        p.start()
+        #p.join()
+    # when only one device we should wait the sub process to quit and kill adb
+    for i in range(devices_count):
+        plist[i].join()
+    #print(devices) # for debug use
+    
+
