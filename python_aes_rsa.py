@@ -4,6 +4,8 @@ from Crypto.Cipher import AES
 from binascii import b2a_hex, a2b_hex
 from Crypto.PublicKey import RSA
 from Crypto import Random
+from Crypto.Cipher import PKCS1_v1_5 as Cipher_pkcs1_v1_5
+import base64
 
 def gen_rsa_key():
     random_generator = Random.new().read  # 伪随机数生成器
@@ -14,9 +16,26 @@ def gen_rsa_key():
         f.write(public_pem)
     
     with open('master-private.pem', 'wb') as f:
-        f.write(public_pem)
+        f.write(private_pem)
     return private_pem, public_pem
 
+
+def rsa_encrypt(key_file, message):
+    with open(key_file, "r") as f:
+        key = f.read()
+        rsakey = RSA.importKey(key)  # 导入读取到的公钥
+        cipher = Cipher_pkcs1_v1_5.new(rsakey)  # 生成对象
+        cipher_text = base64.b64encode(cipher.encrypt(message.encode(encoding="utf-8")))  # 通过生成的对象加密message明文，注意，在python3中加密的数据必须是bytes类型的数据，不能是str类型的数据
+        return cipher_text
+
+def rsa_decrypt(key_file, cipher_text):
+    with open(key_file, "r") as f:
+        key = f.read()
+        rsakey = RSA.importKey(key)  # 导入读取到的公钥
+        cipher = Cipher_pkcs1_v1_5.new(rsakey)  # 生成对象
+        text = cipher.decrypt(base64.b64decode(cipher_text), "ERROR")  # 将密文解密成明文，返回的是一个bytes类型数据，需要自己转换成str
+        return text.decode()
+    
 
    
 class AesCrypt():  
@@ -65,7 +84,14 @@ def test_aes():
 
 def test_rsa():
     print(gen_rsa_key())
+    message = "hello 甲铁城的卡巴内瑞"
+    en_msg = rsa_encrypt('master-public.pem', message)
+    print("en_msg:{}".format(en_msg))
+    de_msg = rsa_decrypt('master-private.pem', en_msg)
+    print(de_msg)
+    
    
 if __name__ == '__main__':
     test_aes()
-    test_rsa()
+    test_rsa()  
+     	 
